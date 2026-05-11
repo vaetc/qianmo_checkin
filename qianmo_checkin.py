@@ -79,7 +79,7 @@ class QianMoCheckin:
                 'formhash': formhash,
                 'qdxq': 'kx',
                 'qdmode': '1',
-                'todaysay': '开心是一种选择，快乐融入日常，感受每一个美好的瞬间！'
+                'todaysay': '每日自动签到'
             }
             
             response = self.session.post(checkin_url, data=data)
@@ -107,27 +107,51 @@ class QianMoCheckin:
     def get_daily_tasks(self):
         """获取每日任务列表"""
         try:
-            response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
+            # 先访问任务主页
+            response = self.session.get(f"{self.base_url}/home.php?mod=task")
+            print(f"  [调试] 任务页面响应长度: {len(response.text)}")
             
-            # 从 HTML 中提取任务信息
-            task_pattern = r'<h3[^>]*>\s*<a\s+href="home\.php\?mod=task&(?:amp;)?do=view&(?:amp;)?id=(\d+)"[^>]*>([^<]+)</a>'
-            tasks = re.findall(task_pattern, response.text)
+            # 尝试多种模式匹配任务
+            patterns = [
+                # 模式1: 标准链接
+                r'<a\s+href="home\.php\?mod=task&(?:amp;)?do=(?:view|apply)&(?:amp;)?id=(\d+)"[^>]*>([^<]+)</a>',
+                # 模式2: 任务表格
+                r'<h3[^>]*>\s*<a[^>]*id=(\d+)[^>]*>([^<]+)</a>',
+                # 模式3: 简化版
+                r'do=apply&(?:amp;)?id=(\d+)[^>]*>([^<]+)<',
+            ]
             
+            all_tasks = []
+            
+            for pattern in patterns:
+                tasks = re.findall(pattern, response.text)
+                if tasks:
+                    print(f"  [调试] 使用模式匹配到 {len(tasks)} 个任务")
+                    all_tasks.extend(tasks)
+            
+            # 去重
             available_tasks = []
             seen_ids = set()
             
-            for task_id, task_name in tasks:
+            for task_id, task_name in all_tasks:
                 if task_id in seen_ids:
                     continue
                 seen_ids.add(task_id)
                 
                 task_name = task_name.strip()
-                if task_name:
+                # 过滤掉明显不是任务名的内容
+                if task_name and len(task_name) < 50 and '搜索' not in task_name:
                     available_tasks.append({
                         'id': task_id,
                         'name': task_name
                     })
                     print(f"  发现任务: {task_name} (ID: {task_id})")
+            
+            # 如果没找到任务,保存页面用于调试
+            if not available_tasks:
+                with open('/tmp/task_page.html', 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+                print(f"  [调试] 任务页面已保存到 /tmp/task_page.html")
             
             return available_tasks
             
@@ -142,12 +166,8 @@ class QianMoCheckin:
             response = self.session.get(apply_url)
             response_text = response.text
             
-            # 打印响应内容用于调试
-            print(f"  [调试] 申请响应长度: {len(response_text)}")
-            
             # 检查是否需要确认
             if '确认' in response_text or 'confirm' in response_text.lower():
-                print(f"  [调试] 需要确认申请")
                 # 尝试直接确认
                 confirm_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}&confirm=1"
                 response = self.session.get(confirm_url)
@@ -176,10 +196,6 @@ class QianMoCheckin:
                             return False
                 
                 print(f"  ⚠️  申请任务失败: {task_name}")
-                # 保存响应用于调试
-                with open('/tmp/apply_response.html', 'w', encoding='utf-8') as f:
-                    f.write(response_text)
-                print(f"  [调试] 响应已保存到 /tmp/apply_response.html")
                 return False
                 
         except Exception as e:
@@ -223,6 +239,7 @@ class QianMoCheckin:
         
         if not tasks:
             print("  ⚠️  未找到可用任务")
+            print("  💡 提示: 请访问 https://www.1000qm.vip/home.php?mod=task 查看任务状态")
             return False
         
         print(f"  📋 找到 {len(tasks)} 个任务\n")
@@ -250,19 +267,23 @@ class QianMoCheckin:
     def get_prestige(self):
         """获取威望信息"""
         try:
-            response = self.session.get(f"{self.base_url}/home.php?mod=space&do=home")
+            response = self.session.get(f"{self.base_url}/home.php?mod=spacecp&ac=credit&showcredit=1")
             
             prestige = None
             credits = None
             
-            prestige_match = re.search(r'威望[：:]\s*(\d+)', response.text)
-            if prestige_match:
-                prestige = prestige_match.group(1)
+            # 尝试多种模式匹配威望
+            patterns = [
+                r'威望[：:]\s*(\d+)',
+                r'<em>威望</em>\s*<span[^>]*>(\d+)</span>',
+                r'威望.*?(\d+)',
+            ]
             
-            if not prestige:
-                prestige_match = re.search(r'<em>威望</em>\s*<span[^>]*>(\d+)</span>', response.text)
+            for pattern in patterns:
+                prestige_match = re.search(pattern, response.text)
                 if prestige_match:
                     prestige = prestige_match.group(1)
+                    break
             
             credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
             if credits_match:
@@ -273,7 +294,7 @@ class QianMoCheckin:
                 print(f"📊 当前威望: {prestige} | 积分: {credits_str}")
                 return True
             else:
-                print("⚠️  无法获取威望信息")
+                print("⚠️  无法获取威望信息,可能需要更新 Cookie")
                 return False
                 
         except Exception as e:
@@ -286,13 +307,13 @@ class QianMoCheckin:
             response = self.session.get(f"{self.base_url}/forum.php")
             
             if 'member.php?mod=logging&action=login' in response.text:
-                print("❌ Cookie 已失效，请重新获取")
+                print("❌ Cookie 已失效,请重新获取")
                 return False
             
             username_match = re.search(r'<a[^>]*title="访问我的空间"[^>]*>([^<]+)</a>', response.text)
             if username_match:
                 username = username_match.group(1).strip()
-                print(f"✅ 登录验证成功，用户: {username}")
+                print(f"✅ 登录验证成功,用户: {username}")
                 return True
             
             print("✅ 登录验证成功")
@@ -345,6 +366,8 @@ def main():
         print("⚠️  部分任务完成")
     else:
         print("❌ 任务执行失败")
+    
+    print(f"提示: https://www.1000qm.vip/home.php?mod=task 或 https://www.1000qm.vip/home.php?mod=task&item=new 有每日威望红包任务")
     print(f"{'='*50}")
 
 if __name__ == "__main__":
