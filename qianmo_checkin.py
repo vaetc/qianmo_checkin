@@ -10,7 +10,6 @@ class QianMoCheckin:
         self.base_url = "https://www.1000qm.vip"
         self.session = requests.Session()
         
-        # 提取核心 Cookie 字段
         self.core_cookies = self._extract_core_cookies(cookie)
         
         self.session.headers.update({
@@ -20,7 +19,6 @@ class QianMoCheckin:
             'Referer': f'{self.base_url}/forum.php'
         })
         
-        # 设置 Cookie
         self._set_cookies(cookie)
     
     def _extract_core_cookies(self, cookie_string):
@@ -54,7 +52,6 @@ class QianMoCheckin:
         """获取 formhash"""
         try:
             response = self.session.get(f"{self.base_url}/forum.php")
-            self._update_session_cookies(response)
             
             match = re.search(r'formhash=([a-z0-9]+)', response.text)
             if match:
@@ -86,8 +83,6 @@ class QianMoCheckin:
             }
             
             response = self.session.post(checkin_url, data=data)
-            self._update_session_cookies(response)
-            
             response_text = response.text
             
             if '签到成功' in response_text:
@@ -113,10 +108,8 @@ class QianMoCheckin:
         """获取每日任务列表"""
         try:
             response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
-            self._update_session_cookies(response)
             
             # 从 HTML 中提取任务信息
-            # 匹配任务表格中的任务ID和名称
             task_pattern = r'<h3[^>]*>\s*<a\s+href="home\.php\?mod=task&(?:amp;)?do=view&(?:amp;)?id=(\d+)"[^>]*>([^<]+)</a>'
             tasks = re.findall(task_pattern, response.text)
             
@@ -147,18 +140,46 @@ class QianMoCheckin:
         try:
             apply_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}"
             response = self.session.get(apply_url)
-            self._update_session_cookies(response)
-            
             response_text = response.text
+            
+            # 打印响应内容用于调试
+            print(f"  [调试] 申请响应长度: {len(response_text)}")
+            
+            # 检查是否需要确认
+            if '确认' in response_text or 'confirm' in response_text.lower():
+                print(f"  [调试] 需要确认申请")
+                # 尝试直接确认
+                confirm_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}&confirm=1"
+                response = self.session.get(confirm_url)
+                response_text = response.text
             
             if '成功接受任务' in response_text or '申请成功' in response_text:
                 print(f"  ✅ 申请任务成功: {task_name}")
                 return True
-            elif '已申请过' in response_text or '您已经申请过' in response_text:
+            elif '已申请过' in response_text or '您已经申请过' in response_text or '进行中' in response_text:
                 print(f"  ℹ️  任务已申请: {task_name}")
                 return True
             else:
+                # 提取可能的错误信息
+                error_patterns = [
+                    r'<div[^>]*class="[^"]*alert[^"]*"[^>]*>(.*?)</div>',
+                    r'<p[^>]*class="[^"]*error[^"]*"[^>]*>(.*?)</p>',
+                    r'showDialog\([\'"]([^\'"]+)[\'"]\)',
+                ]
+                
+                for pattern in error_patterns:
+                    error_match = re.search(pattern, response_text, re.DOTALL)
+                    if error_match:
+                        error_msg = re.sub(r'<[^>]+>', '', error_match.group(1)).strip()
+                        if error_msg:
+                            print(f"  ⚠️  申请失败: {error_msg}")
+                            return False
+                
                 print(f"  ⚠️  申请任务失败: {task_name}")
+                # 保存响应用于调试
+                with open('/tmp/apply_response.html', 'w', encoding='utf-8') as f:
+                    f.write(response_text)
+                print(f"  [调试] 响应已保存到 /tmp/apply_response.html")
                 return False
                 
         except Exception as e:
@@ -170,8 +191,6 @@ class QianMoCheckin:
         try:
             draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
             response = self.session.get(draw_url)
-            self._update_session_cookies(response)
-            
             response_text = response.text
             
             if '恭喜' in response_text or '成功' in response_text:
@@ -232,12 +251,10 @@ class QianMoCheckin:
         """获取威望信息"""
         try:
             response = self.session.get(f"{self.base_url}/home.php?mod=space&do=home")
-            self._update_session_cookies(response)
             
             prestige = None
             credits = None
             
-            # 从积分信息中提取
             prestige_match = re.search(r'威望[：:]\s*(\d+)', response.text)
             if prestige_match:
                 prestige = prestige_match.group(1)
