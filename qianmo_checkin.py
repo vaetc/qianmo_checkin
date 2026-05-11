@@ -32,7 +32,6 @@ class QianMoCheckin:
             item = item.strip()
             if '=' in item:
                 key, value = item.split('=', 1)
-                # 检查是否包含核心关键字
                 for core_key in core_keys:
                     if core_key in key:
                         core_cookies[key] = value
@@ -49,11 +48,10 @@ class QianMoCheckin:
     
     def _update_session_cookies(self, response):
         """从响应中更新 session cookies"""
-        # requests 会自动处理 Set-Cookie，这里只是确保更新
         pass
     
     def get_formhash(self):
-        """获取 formhash 用于签到和任务"""
+        """获取 formhash"""
         try:
             response = self.session.get(f"{self.base_url}/forum.php")
             self._update_session_cookies(response)
@@ -62,7 +60,6 @@ class QianMoCheckin:
             if match:
                 return match.group(1)
             
-            # 尝试从其他位置提取
             match = re.search(r'name="formhash"\s+value="([a-z0-9]+)"', response.text)
             if match:
                 return match.group(1)
@@ -80,13 +77,12 @@ class QianMoCheckin:
             return False
         
         try:
-            # Discuz 签到接口
             checkin_url = f"{self.base_url}/plugin.php?id=dsu_paulsign:sign&operation=qiandao&infloat=1&inajax=1"
             data = {
                 'formhash': formhash,
-                'qdxq': 'kx',  # 签到心情：开心
+                'qdxq': 'kx',
                 'qdmode': '1',
-                'todaysay': ' 开心是一种选择，快乐融入日常，感受每一个美好的瞬间！'
+                'todaysay': '开心是一种选择，快乐融入日常，感受每一个美好的瞬间！'
             }
             
             response = self.session.post(checkin_url, data=data)
@@ -101,13 +97,12 @@ class QianMoCheckin:
                 print("ℹ️  今天已经签到过了")
                 return True
             else:
-                # 尝试提取错误信息
                 error_match = re.search(r'<root><!\[CDATA\[(.*?)\]\]></root>', response_text)
                 if error_match:
                     error_msg = error_match.group(1)
                     print(f"❌ 签到失败: {error_msg}")
                 else:
-                    print(f"❌ 签到失败，响应内容: {response_text[:200]}")
+                    print(f"❌ 签到失败")
                 return False
                 
         except Exception as e:
@@ -117,13 +112,13 @@ class QianMoCheckin:
     def get_daily_tasks(self):
         """获取每日任务列表"""
         try:
-            response = self.session.get(f"{self.base_url}/home.php?mod=task")
+            response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
             self._update_session_cookies(response)
             
-            # 查找所有可申请的任务（包含"申请此任务"按钮的）
-            # 匹配任务ID和任务名称
-            task_pattern = r'<a\s+href="home\.php\?mod=task&(?:amp;)?do=apply&(?:amp;)?id=(\d+)"[^>]*>(.*?)</a>'
-            tasks = re.findall(task_pattern, response.text, re.DOTALL)
+            # 从 HTML 中提取任务信息
+            # 匹配任务表格中的任务ID和名称
+            task_pattern = r'<h3[^>]*>\s*<a\s+href="home\.php\?mod=task&(?:amp;)?do=view&(?:amp;)?id=(\d+)"[^>]*>([^<]+)</a>'
+            tasks = re.findall(task_pattern, response.text)
             
             available_tasks = []
             seen_ids = set()
@@ -133,30 +128,13 @@ class QianMoCheckin:
                     continue
                 seen_ids.add(task_id)
                 
-                # 清理任务名称
-                task_name = re.sub(r'<.*?>', '', task_name).strip()
-                if task_name and '申请' not in task_name:
+                task_name = task_name.strip()
+                if task_name:
                     available_tasks.append({
                         'id': task_id,
                         'name': task_name
                     })
-            
-            # 如果没找到，尝试另一种模式
-            if not available_tasks:
-                task_pattern = r'id=(\d+).*?class="xi2[^"]*"[^>]*>(.*?)</a>'
-                tasks = re.findall(task_pattern, response.text, re.DOTALL)
-                
-                for task_id, task_name in tasks:
-                    if task_id in seen_ids:
-                        continue
-                    seen_ids.add(task_id)
-                    
-                    task_name = re.sub(r'<.*?>', '', task_name).strip()
-                    if task_name:
-                        available_tasks.append({
-                            'id': task_id,
-                            'name': task_name
-                        })
+                    print(f"  发现任务: {task_name} (ID: {task_id})")
             
             return available_tasks
             
@@ -197,7 +175,6 @@ class QianMoCheckin:
             response_text = response.text
             
             if '恭喜' in response_text or '成功' in response_text:
-                # 尝试提取奖励信息
                 reward_match = re.search(r'威望.*?(\d+)', response_text)
                 if reward_match:
                     reward = reward_match.group(1)
@@ -209,7 +186,7 @@ class QianMoCheckin:
                 print(f"  ℹ️  任务已完成: {task_name}")
                 return True
             elif '还未完成' in response_text or '未完成' in response_text:
-                print(f"  ⏳ 任务未完成，需要满足条件: {task_name}")
+                print(f"  ⏳ 任务未完成: {task_name}")
                 return False
             else:
                 print(f"  ⚠️  领取奖励失败: {task_name}")
@@ -239,15 +216,13 @@ class QianMoCheckin:
             
             print(f"  处理任务: {task_name} (ID: {task_id})")
             
-            # 申请任务
             if self.apply_task(task_id, task_name):
-                time.sleep(2)  # 等待2秒
+                time.sleep(2)
                 
-                # 领取奖励
                 if self.draw_task(task_id, task_name):
                     success_count += 1
             
-            time.sleep(1)  # 任务间隔
+            time.sleep(1)
             print()
         
         print(f"  ✅ 成功完成 {success_count}/{len(tasks)} 个任务")
@@ -259,22 +234,19 @@ class QianMoCheckin:
             response = self.session.get(f"{self.base_url}/home.php?mod=space&do=home")
             self._update_session_cookies(response)
             
-            # 提取威望信息 - 多种模式匹配
             prestige = None
             credits = None
             
-            # 模式1: 威望: 数字
+            # 从积分信息中提取
             prestige_match = re.search(r'威望[：:]\s*(\d+)', response.text)
             if prestige_match:
                 prestige = prestige_match.group(1)
             
-            # 模式2: 从积分信息中提取
             if not prestige:
                 prestige_match = re.search(r'<em>威望</em>\s*<span[^>]*>(\d+)</span>', response.text)
                 if prestige_match:
                     prestige = prestige_match.group(1)
             
-            # 提取积分
             credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
             if credits_match:
                 credits = credits_match.group(1)
@@ -284,7 +256,7 @@ class QianMoCheckin:
                 print(f"📊 当前威望: {prestige} | 积分: {credits_str}")
                 return True
             else:
-                print("⚠️  无法获取威望信息，可能需要更新 Cookie")
+                print("⚠️  无法获取威望信息")
                 return False
                 
         except Exception as e:
@@ -296,12 +268,10 @@ class QianMoCheckin:
         try:
             response = self.session.get(f"{self.base_url}/forum.php")
             
-            # 检查是否包含登录用户信息
             if 'member.php?mod=logging&action=login' in response.text:
                 print("❌ Cookie 已失效，请重新获取")
                 return False
             
-            # 尝试提取用户名
             username_match = re.search(r'<a[^>]*title="访问我的空间"[^>]*>([^<]+)</a>', response.text)
             if username_match:
                 username = username_match.group(1).strip()
@@ -321,17 +291,14 @@ def main():
     print(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*50}\n")
     
-    # 从环境变量获取 Cookie
     cookie = os.environ.get('QIANMO_COOKIE')
     
     if not cookie:
         print("❌ 错误: 未设置 QIANMO_COOKIE 环境变量")
-        print("请在 GitHub Secrets 中添加 QIANMO_COOKIE")
         return
     
     checker = QianMoCheckin(cookie)
     
-    # 0. 验证登录状态
     print("🔄 验证登录状态...")
     if not checker.verify_login():
         print("\n请重新获取 Cookie 并更新 GitHub Secrets")
@@ -340,20 +307,17 @@ def main():
     
     time.sleep(1)
     
-    # 1. 执行签到
     print("🔄 开始签到...")
     checkin_success = checker.checkin()
     print()
     
     time.sleep(2)
     
-    # 2. 完成每日任务
     task_success = checker.complete_daily_tasks()
     print()
     
     time.sleep(2)
     
-    # 3. 获取威望
     print("🔄 获取威望信息...")
     checker.get_prestige()
     
