@@ -86,7 +86,7 @@ class QianMoCheckin:
                 'formhash': formhash,
                 'qdxq': 'kx',  # 签到心情：开心
                 'qdmode': '1',
-                'todaysay': '每日自动签到'
+                'todaysay': ' 开心是一种选择，快乐融入日常，感受每一个美好的瞬间！'
             }
             
             response = self.session.post(checkin_url, data=data)
