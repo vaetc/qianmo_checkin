@@ -24,7 +24,7 @@
 
 ### 2. 获取 Cookie
 
-1. 登录 https://www.1000qm.vip/
+1. 登录 [QMJ](https://www.1000qm.vip/)
 2. 按 F12 打开开发者工具
 3. 切换到 Network（网络）标签
 4. 刷新页面
