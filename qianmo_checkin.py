@@ -9,19 +9,64 @@ class QianMoCheckin:
     def __init__(self, cookie):
         self.base_url = "https://www.1000qm.vip"
         self.session = requests.Session()
+        
+        # 提取核心 Cookie 字段
+        self.core_cookies = self._extract_core_cookies(cookie)
+        
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Cookie': cookie,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Referer': f'{self.base_url}/forum.php'
         })
+        
+        # 设置 Cookie
+        self._set_cookies(cookie)
+    
+    def _extract_core_cookies(self, cookie_string):
+        """提取核心认证 Cookie"""
+        core_keys = ['auth', 'saltkey']
+        core_cookies = {}
+        
+        for item in cookie_string.split(';'):
+            item = item.strip()
+            if '=' in item:
+                key, value = item.split('=', 1)
+                # 检查是否包含核心关键字
+                for core_key in core_keys:
+                    if core_key in key:
+                        core_cookies[key] = value
+        
+        return core_cookies
+    
+    def _set_cookies(self, cookie_string):
+        """设置 Cookie 到 session"""
+        for item in cookie_string.split(';'):
+            item = item.strip()
+            if '=' in item:
+                key, value = item.split('=', 1)
+                self.session.cookies.set(key, value, domain='.1000qm.vip')
+    
+    def _update_session_cookies(self, response):
+        """从响应中更新 session cookies"""
+        # requests 会自动处理 Set-Cookie，这里只是确保更新
+        pass
     
     def get_formhash(self):
         """获取 formhash 用于签到和任务"""
         try:
             response = self.session.get(f"{self.base_url}/forum.php")
+            self._update_session_cookies(response)
+            
             match = re.search(r'formhash=([a-z0-9]+)', response.text)
             if match:
                 return match.group(1)
+            
+            # 尝试从其他位置提取
+            match = re.search(r'name="formhash"\s+value="([a-z0-9]+)"', response.text)
+            if match:
+                return match.group(1)
+                
             return None
         except Exception as e:
             print(f"获取 formhash 失败: {e}")
@@ -45,15 +90,24 @@ class QianMoCheckin:
             }
             
             response = self.session.post(checkin_url, data=data)
+            self._update_session_cookies(response)
             
-            if '签到成功' in response.text or '已经签到' in response.text:
+            response_text = response.text
+            
+            if '签到成功' in response_text:
                 print("✅ 签到成功")
                 return True
-            elif '已经签到' in response.text:
+            elif '已经签到' in response_text or '您今天已经签到过了' in response_text:
                 print("ℹ️  今天已经签到过了")
                 return True
             else:
-                print(f"❌ 签到失败: {response.text[:200]}")
+                # 尝试提取错误信息
+                error_match = re.search(r'<root><!\[CDATA\[(.*?)\]\]></root>', response_text)
+                if error_match:
+                    error_msg = error_match.group(1)
+                    print(f"❌ 签到失败: {error_msg}")
+                else:
+                    print(f"❌ 签到失败，响应内容: {response_text[:200]}")
                 return False
                 
         except Exception as e:
@@ -64,20 +118,45 @@ class QianMoCheckin:
         """获取每日任务列表"""
         try:
             response = self.session.get(f"{self.base_url}/home.php?mod=task")
+            self._update_session_cookies(response)
             
-            # 查找所有可用任务
+            # 查找所有可申请的任务（包含"申请此任务"按钮的）
             # 匹配任务ID和任务名称
-            task_pattern = r'home\.php\?mod=task&do=apply&id=(\d+).*?class="xi2">(.*?)</a>'
+            task_pattern = r'<a\s+href="home\.php\?mod=task&(?:amp;)?do=apply&(?:amp;)?id=(\d+)"[^>]*>(.*?)</a>'
             tasks = re.findall(task_pattern, response.text, re.DOTALL)
             
             available_tasks = []
+            seen_ids = set()
+            
             for task_id, task_name in tasks:
+                if task_id in seen_ids:
+                    continue
+                seen_ids.add(task_id)
+                
+                # 清理任务名称
                 task_name = re.sub(r'<.*?>', '', task_name).strip()
-                if task_name:
+                if task_name and '申请' not in task_name:
                     available_tasks.append({
                         'id': task_id,
                         'name': task_name
                     })
+            
+            # 如果没找到，尝试另一种模式
+            if not available_tasks:
+                task_pattern = r'id=(\d+).*?class="xi2[^"]*"[^>]*>(.*?)</a>'
+                tasks = re.findall(task_pattern, response.text, re.DOTALL)
+                
+                for task_id, task_name in tasks:
+                    if task_id in seen_ids:
+                        continue
+                    seen_ids.add(task_id)
+                    
+                    task_name = re.sub(r'<.*?>', '', task_name).strip()
+                    if task_name:
+                        available_tasks.append({
+                            'id': task_id,
+                            'name': task_name
+                        })
             
             return available_tasks
             
@@ -88,15 +167,17 @@ class QianMoCheckin:
     def apply_task(self, task_id, task_name):
         """申请任务"""
         try:
-            formhash = self.get_formhash()
-            if not formhash:
-                return False
-            
             apply_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}"
             response = self.session.get(apply_url)
+            self._update_session_cookies(response)
             
-            if '成功' in response.text or '已申请' in response.text:
+            response_text = response.text
+            
+            if '成功接受任务' in response_text or '申请成功' in response_text:
                 print(f"  ✅ 申请任务成功: {task_name}")
+                return True
+            elif '已申请过' in response_text or '您已经申请过' in response_text:
+                print(f"  ℹ️  任务已申请: {task_name}")
                 return True
             else:
                 print(f"  ⚠️  申请任务失败: {task_name}")
@@ -109,25 +190,27 @@ class QianMoCheckin:
     def draw_task(self, task_id, task_name):
         """领取任务奖励"""
         try:
-            formhash = self.get_formhash()
-            if not formhash:
-                return False
-            
             draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
             response = self.session.get(draw_url)
+            self._update_session_cookies(response)
             
-            if '成功' in response.text or '恭喜' in response.text:
+            response_text = response.text
+            
+            if '恭喜' in response_text or '成功' in response_text:
                 # 尝试提取奖励信息
-                reward_match = re.search(r'威望.*?(\d+)', response.text)
+                reward_match = re.search(r'威望.*?(\d+)', response_text)
                 if reward_match:
                     reward = reward_match.group(1)
                     print(f"  🎁 领取奖励成功: {task_name} (+{reward} 威望)")
                 else:
                     print(f"  🎁 领取奖励成功: {task_name}")
                 return True
-            elif '已完成' in response.text or '已领取' in response.text:
+            elif '已完成' in response_text or '已领取' in response_text:
                 print(f"  ℹ️  任务已完成: {task_name}")
                 return True
+            elif '还未完成' in response_text or '未完成' in response_text:
+                print(f"  ⏳ 任务未完成，需要满足条件: {task_name}")
+                return False
             else:
                 print(f"  ⚠️  领取奖励失败: {task_name}")
                 return False
@@ -158,7 +241,7 @@ class QianMoCheckin:
             
             # 申请任务
             if self.apply_task(task_id, task_name):
-                time.sleep(1)  # 等待1秒
+                time.sleep(2)  # 等待2秒
                 
                 # 领取奖励
                 if self.draw_task(task_id, task_name):
@@ -174,22 +257,62 @@ class QianMoCheckin:
         """获取威望信息"""
         try:
             response = self.session.get(f"{self.base_url}/home.php?mod=space&do=home")
+            self._update_session_cookies(response)
             
-            # 提取威望信息
+            # 提取威望信息 - 多种模式匹配
+            prestige = None
+            credits = None
+            
+            # 模式1: 威望: 数字
             prestige_match = re.search(r'威望[：:]\s*(\d+)', response.text)
-            credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
-            
             if prestige_match:
                 prestige = prestige_match.group(1)
-                credits = credits_match.group(1) if credits_match else "未知"
-                print(f"📊 当前威望: {prestige} | 积分: {credits}")
+            
+            # 模式2: 从积分信息中提取
+            if not prestige:
+                prestige_match = re.search(r'<em>威望</em>\s*<span[^>]*>(\d+)</span>', response.text)
+                if prestige_match:
+                    prestige = prestige_match.group(1)
+            
+            # 提取积分
+            credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
+            if credits_match:
+                credits = credits_match.group(1)
+            
+            if prestige:
+                credits_str = credits if credits else "未知"
+                print(f"📊 当前威望: {prestige} | 积分: {credits_str}")
                 return True
             else:
-                print("⚠️  无法获取威望信息")
+                print("⚠️  无法获取威望信息，可能需要更新 Cookie")
                 return False
                 
         except Exception as e:
             print(f"❌ 获取威望异常: {e}")
+            return False
+    
+    def verify_login(self):
+        """验证登录状态"""
+        try:
+            response = self.session.get(f"{self.base_url}/forum.php")
+            
+            # 检查是否包含登录用户信息
+            if 'member.php?mod=logging&action=login' in response.text:
+                print("❌ Cookie 已失效，请重新获取")
+                return False
+            
+            # 尝试提取用户名
+            username_match = re.search(r'<a[^>]*title="访问我的空间"[^>]*>([^<]+)</a>', response.text)
+            if username_match:
+                username = username_match.group(1).strip()
+                print(f"✅ 登录验证成功，用户: {username}")
+                return True
+            
+            print("✅ 登录验证成功")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 验证登录异常: {e}")
             return False
 
 def main():
@@ -207,6 +330,15 @@ def main():
         return
     
     checker = QianMoCheckin(cookie)
+    
+    # 0. 验证登录状态
+    print("🔄 验证登录状态...")
+    if not checker.verify_login():
+        print("\n请重新获取 Cookie 并更新 GitHub Secrets")
+        return
+    print()
+    
+    time.sleep(1)
     
     # 1. 执行签到
     print("🔄 开始签到...")
