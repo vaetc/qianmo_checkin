@@ -257,54 +257,37 @@ class QianMoCheckin:
         print(f"  ✅ 成功完成 {success_count}/{len(all_tasks)} 个任务")
         return success_count > 0
     
-    def get_prestige(self): 
-        """获取威望信息"""
-        try:
-            # 方法1: 从积分页面获取
-            response = self.session.get(f"{self.base_url}/home.php?mod=spacecp&ac=credit&showcredit=1")
-            
-            prestige = None
-            credits = None
+    def get_prestige(self):
+    """获取威望和铜币信息"""
+    try:
+        response = self.session.get(f"{self.base_url}/home.php?mod=spacecp&ac=credit&showcredit=1")
+        html = response.text
         
-            # 尝试多种模式匹配威望
-            patterns = [
-                r'威望[：:]\s*<span[^>]*>(\d+)</span>',  # 更精确的匹配
-                r'<em>威望</em>\s*<span[^>]*>(\d+)</span>',
-                r'威望[：:]\s*(\d+)',
-                r'hcredit_1">(\d+)</span>',  # 从悬浮菜单获取
-            ]
+        # 匹配威望: <li><em> 威望: </em>6576 </li>
+        prestige_match = re.search(r'<em>\s*威望:\s*</em>(\d+)', html)
+        # 匹配铜币: <li class="xi1 cl"><em> 铜币: </em>19862
+        copper_match = re.search(r'<em>\s*铜币:\s*</em>(\d+)', html)
+        # 匹配积分: <li class="cl"><em>积分: </em>8218
+        credits_match = re.search(r'<em>积分:\s*</em>(\d+)', html)
         
-            for pattern in patterns:
-                prestige_match = re.search(pattern, response.text)
-                if prestige_match:
-                    prestige = prestige_match.group(1)
-                    break
-            
-            # 如果第一个方法失败,尝试从首页获取
-            if not prestige:
-                response = self.session.get(f"{self.base_url}/forum.php")
-                # 从首页的积分显示中提取
-                credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
-                if credits_match:
-                    credits = credits_match.group(1)
-                    print(f"📊 当前积分: {credits} (威望信息需要手动查看)")
-                    return True
-            
-            credits_match = re.search(r'积分[：:]\s*(\d+)', response.text)
-            if credits_match:
-                credits = credits_match.group(1)
-            
-            if prestige:
-                credits_str = credits if credits else "未知"
-                print(f"📊 当前威望: {prestige} | 积分: {credits_str}")
-                return True
-            else:
-                print(f"📊 当前积分: {credits if credits else '未知'} (威望信息获取失败)")
-                return False
-            
-        except Exception as e:
-            print(f"❌ 获取威望异常: {e}")
+        result = []
+        if prestige_match:
+            result.append(f"威望: {prestige_match.group(1)}")
+        if copper_match:
+            result.append(f"铜币: {copper_match.group(1)}")
+        if credits_match:
+            result.append(f"积分: {credits_match.group(1)}")
+        
+        if result:
+            print(f"📊 {' | '.join(result)}")
+            return True
+        else:
+            print("⚠️  无法获取积分信息")
             return False
+            
+    except Exception as e:
+        print(f"❌ 获取积分异常: {e}")
+        return False
     
     def verify_login(self):
         """验证登录状态"""
