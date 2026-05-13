@@ -156,20 +156,24 @@ class QianMoCheckin:
                 apply_text = apply_response.text
                 
                 # 检查申请结果
+                apply_success = False
                 if '成功接受任务' in apply_text or '成功' in apply_text:
                     print(f"  ✅ 申请任务成功")
+                    apply_success = True
                 elif '您已经申请过' in apply_text or '进行中' in apply_text:
                     print(f"  ℹ️  任务已申请")
+                    apply_success = True
                 elif '已完成' in apply_text:
                     print(f"  ✅ 任务已完成")
                     return True
-                else:
-                    print(f"  ⚠️  申请任务失败")
                 
                 time.sleep(1)
             
             elif status == 'doing':
                 print(f"  📋 任务进行中: {task_name}")
+                apply_success = True
+            else:
+                apply_success = False
             
             # 尝试完成任务
             draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
@@ -211,14 +215,14 @@ class QianMoCheckin:
             new_status = self.check_task_status()
             
             if new_status == 'done':
-                print(f"  ✅ 完成任务成功（已验证）")
+                print(f"  ✅ 任务完成成功")
                 return True
             elif new_status == 'new':
                 # 任务又变成新的了，说明完成成功
-                print(f"  ✅ 完成任务成功（任务已刷新）")
+                print(f"  ✅ 任务完成成功")
                 return True
             else:
-                print(f"  ⚠️  完成任务失败")
+                print(f"  ⚠️  任务完成失败")
                 return False
                 
         except Exception as e:
