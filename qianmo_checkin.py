@@ -84,15 +84,20 @@ class QianMoCheckin:
             return False
     
     def check_task_status(self):
-        """检查任务状态 - 返回 'new', 'doing', 'done', 'unknown'"""
+        """检查任务状态 - 返回 'new', 'doing', 'done', 'no_new', 'unknown'"""
         try:
             # 先检查新任务页面
             response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
             html = response.text
             
-            # 如果在新任务页面找到，说明可以申请
+            # 如果在新任务页面找到可申请的任务
             if re.search(r'<a href="home\.php\?mod=task&amp;do=apply&amp;id=1"[^>]*>立即申请</a>', html):
                 return 'new'
+            
+            # 如果显示"暂无新任务"
+            if '暂无新任务' in html:
+                # 可能是今天已完成，需要进一步检查
+                pass
             
             # 检查进行中的任务
             response = self.session.get(f"{self.base_url}/home.php?mod=task&item=doing")
@@ -120,10 +125,13 @@ class QianMoCheckin:
                 if complete_time.date() == today:
                     return 'done'
                 else:
-                    # 昨天或更早完成的，应该可以重新申请
-                    return 'new'
+                    # 昨天或更早完成的，但新任务页面显示暂无新任务
+                    # 这种情况可能是任务还没刷新
+                    return 'no_new'
             
-            return 'unknown'
+            # 如果新任务页面显示暂无新任务，但在已完成列表也找不到
+            # 可能是任务还没刷新或其他原因
+            return 'no_new'
             
         except Exception as e:
             print(f"  检查任务状态异常: {e}")
@@ -137,6 +145,10 @@ class QianMoCheckin:
             
             if status == 'done':
                 print(f"  ✅ 每日威望红包任务今天已完成")
+                return True
+            
+            if status == 'no_new':
+                print(f"  ℹ️  暂无新任务（可能今天已完成或任务未刷新）")
                 return True
             
             if status == 'unknown':
@@ -156,13 +168,10 @@ class QianMoCheckin:
                 apply_text = apply_response.text
                 
                 # 检查申请结果
-                apply_success = False
                 if '成功接受任务' in apply_text or '成功' in apply_text:
                     print(f"  ✅ 申请任务成功")
-                    apply_success = True
                 elif '您已经申请过' in apply_text or '进行中' in apply_text:
                     print(f"  ℹ️  任务已申请")
-                    apply_success = True
                 elif '已完成' in apply_text:
                     print(f"  ✅ 任务已完成")
                     return True
@@ -171,9 +180,6 @@ class QianMoCheckin:
             
             elif status == 'doing':
                 print(f"  📋 任务进行中: {task_name}")
-                apply_success = True
-            else:
-                apply_success = False
             
             # 尝试完成任务
             draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
@@ -217,8 +223,7 @@ class QianMoCheckin:
             if new_status == 'done':
                 print(f"  ✅ 任务完成成功")
                 return True
-            elif new_status == 'new':
-                # 任务又变成新的了，说明完成成功
+            elif new_status == 'no_new':
                 print(f"  ✅ 任务完成成功")
                 return True
             else:
