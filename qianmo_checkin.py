@@ -83,35 +83,72 @@ class QianMoCheckin:
             print(f"❌ 签到异常: {e}")
             return False
     
-    def check_task_completion(self):
-        """检查任务是否已完成(通过通知页面)"""
+    def check_task_done(self):
+        """检查任务是否已完成"""
         try:
-            response = self.session.get(f"{self.base_url}/home.php?mod=space&do=notice")
+            response = self.session.get(f"{self.base_url}/home.php?mod=task&item=done")
             html = response.text
             
-            # 查找今天的任务完成通知
-            today = datetime.now().strftime('%Y-%m-%d')
-            # 匹配: 恭喜您完成任务：<a href="home.php?mod=task&do=view&id=1" target="_blank">每日威望红包</a>
-            pattern = rf'{today}.*?恭喜您完成任务.*?每日威望红包'
+            # 查找每日威望红包任务
+            # <h3 class="xs2 xi2"><a href="home.php?mod=task&amp;do=view&amp;id=1">每日威望红包</a>
+            pattern = r'<a href="home\.php\?mod=task&amp;do=view&amp;id=1">每日威望红包</a>'
             
-            if re.search(pattern, html, re.DOTALL):
-                return True
+            if re.search(pattern, html):
+                # 提取完成时间和可再次申请时间
+                time_pattern = r'完成于 (\d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2}).*?(\d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2}) 后可以再次申请'
+                time_match = re.search(time_pattern, html, re.DOTALL)
+                
+                if time_match:
+                    complete_time = time_match.group(1)
+                    next_time = time_match.group(2)
+                    return True, complete_time, next_time
+                else:
+                    return True, None, None
             
-            return False
+            return False, None, None
             
         except Exception as e:
-            print(f"  检查任务完成状态异常: {e}")
+            print(f"  检查任务状态异常: {e}")
+            return False, None, None
+    
+    def check_task_new(self):
+        """检查是否有新任务"""
+        try:
+            response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
+            html = response.text
+            
+            # 查找每日威望红包任务
+            pattern = r'<a href="home\.php\?mod=task&amp;do=apply&amp;id=1">每日威望红包</a>'
+            
+            return re.search(pattern, html) is not None
+            
+        except Exception as e:
+            print(f"  检查新任务异常: {e}")
             return False
     
     def process_tasks(self):
         """处理每日任务"""
         try:
             # 先检查是否已完成
-            if self.check_task_completion():
-                print("  ✅ 每日威望红包任务今天已完成")
+            is_done, complete_time, next_time = self.check_task_done()
+            
+            if is_done:
+                if complete_time and next_time:
+                    print(f"  ✅ 每日威望红包任务已完成")
+                    print(f"     完成时间: {complete_time}")
+                    print(f"     下次可申请: {next_time}")
+                else:
+                    print(f"  ✅ 每日威望红包任务已完成")
                 return True
             
-            # 尝试直接申请和完成任务
+            # 检查是否有新任务
+            has_new = self.check_task_new()
+            
+            if not has_new:
+                print(f"  ℹ️  暂无可申请的任务")
+                return False
+            
+            # 有新任务,尝试申请和完成
             task_id = '1'
             task_name = '每日威望红包'
             
@@ -127,11 +164,9 @@ class QianMoCheckin:
                 print(f"  ✅ 申请任务成功")
             elif '您已经申请过' in apply_text or '进行中' in apply_text:
                 print(f"  ℹ️  任务已申请")
-            elif '已完成' in apply_text:
-                print(f"  ✅ 任务已完成")
-                return True
             else:
                 print(f"  ⚠️  申请任务失败")
+                return False
             
             time.sleep(1)
             
@@ -152,9 +187,6 @@ class QianMoCheckin:
             elif '已完成' in draw_text or '已领取' in draw_text:
                 print(f"  ✅ 任务已完成")
                 return True
-            elif '还未完成' in draw_text or '未完成' in draw_text:
-                print(f"  ⏳ 任务条件未满足")
-                return False
             else:
                 print(f"  ⚠️  完成任务失败")
                 return False
