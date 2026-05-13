@@ -89,8 +89,7 @@ class QianMoCheckin:
             response = self.session.get(f"{self.base_url}/home.php?mod=task&item=done")
             html = response.text
             
-            # 查找每日威望红包任务
-            # <h3 class="xs2 xi2"><a href="home.php?mod=task&amp;do=view&amp;id=1">每日威望红包</a>
+            # 查找每日威望红包任务 - 注意HTML中使用 &amp;
             pattern = r'<a href="home\.php\?mod=task&amp;do=view&amp;id=1">每日威望红包</a>'
             
             if re.search(pattern, html):
@@ -117,8 +116,8 @@ class QianMoCheckin:
             response = self.session.get(f"{self.base_url}/home.php?mod=task&item=new")
             html = response.text
             
-            # 查找每日威望红包任务
-            pattern = r'<a href="home\.php\?mod=task&amp;do=apply&amp;id=1">每日威望红包</a>'
+            # 查找每日威望红包任务 - 注意HTML中使用 &amp;
+            pattern = r'<a href="home\.php\?mod=task&amp;do=apply&amp;id=1"[^>]*>立即申请</a>'
             
             return re.search(pattern, html) is not None
             
@@ -152,7 +151,7 @@ class QianMoCheckin:
             task_id = '1'
             task_name = '每日威望红包'
             
-            print(f"  处理任务: {task_name} (ID: {task_id})")
+            print(f"  📋 发现新任务: {task_name}")
             
             # 申请任务
             apply_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}"
@@ -160,13 +159,16 @@ class QianMoCheckin:
             apply_text = apply_response.text
             
             # 检查申请结果
-            if '成功接受任务' in apply_text:
+            if '成功接受任务' in apply_text or '成功' in apply_text:
                 print(f"  ✅ 申请任务成功")
             elif '您已经申请过' in apply_text or '进行中' in apply_text:
                 print(f"  ℹ️  任务已申请")
+            elif '已完成' in apply_text:
+                print(f"  ✅ 任务已完成")
+                return True
             else:
                 print(f"  ⚠️  申请任务失败")
-                return False
+                # 即使申请失败也尝试完成
             
             time.sleep(1)
             
