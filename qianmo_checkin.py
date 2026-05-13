@@ -83,60 +83,80 @@ class QianMoCheckin:
             print(f"❌ 签到异常: {e}")
             return False
     
+    def check_task_completion(self):
+        """检查任务是否已完成(通过通知页面)"""
+        try:
+            response = self.session.get(f"{self.base_url}/home.php?mod=space&do=notice")
+            html = response.text
+            
+            # 查找今天的任务完成通知
+            today = datetime.now().strftime('%Y-%m-%d')
+            # 匹配: 恭喜您完成任务：<a href="home.php?mod=task&do=view&id=1" target="_blank">每日威望红包</a>
+            pattern = rf'{today}.*?恭喜您完成任务.*?每日威望红包'
+            
+            if re.search(pattern, html, re.DOTALL):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"  检查任务完成状态异常: {e}")
+            return False
+    
     def process_tasks(self):
         """处理每日任务"""
         try:
-            response = self.session.get(f"{self.base_url}/home.php?mod=task")
-            
-            # 解析任务列表
-            new_tasks = re.findall(r'<a href="home\.php\?mod=task&amp;do=apply&amp;id=(\d+)"[^>]*>([^<]+)</a>', response.text)
-            done_tasks = re.findall(r'<a href="home\.php\?mod=task&amp;do=view&amp;id=(\d+)"[^>]*>([^<]+)</a>.*?class="xi1">已完成', response.text, re.DOTALL)
-            
-            print(f"  📋 新任务: {len(new_tasks)} 个")
-            for task_id, task_name in new_tasks:
-                print(f"    - {task_name} (ID: {task_id})")
-            
-            print(f"  ✅ 已完成: {len(done_tasks)} 个")
-            for task_id, task_name in done_tasks:
-                print(f"    - {task_name} (ID: {task_id})")
-            
-            # 如果目标任务已完成,直接返回成功
-            target_task_done = any(task_id == '1' for task_id, _ in done_tasks)
-            if target_task_done:
-                print("  ✅ 每日威望红包任务已完成")
+            # 先检查是否已完成
+            if self.check_task_completion():
+                print("  ✅ 每日威望红包任务今天已完成")
                 return True
             
-            # 处理新任务
-            success_count = 0
-            for task_id, task_name in new_tasks:
-                if task_id != '1':  # 只处理每日威望红包
-                    continue
-                    
-                print(f"  处理任务: {task_name} (ID: {task_id})")
-                
-                # 申请任务
-                apply_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}"
-                apply_response = self.session.get(apply_url)
-                
-                if '成功接受任务' in apply_response.text or '您已接受过该任务' in apply_response.text:
-                    time.sleep(1)
-                    # 完成任务
-                    draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
-                    draw_response = self.session.get(draw_url)
-                    
-                    if '成功' in draw_response.text or '恭喜' in draw_response.text:
-                        print(f"  ✅ 完成任务: {task_name}")
-                        success_count += 1
-                    else:
-                        print(f"  ⚠️  完成任务失败: {task_name}")
-                else:
-                    print(f"  ⚠️  申请任务失败: {task_name}")
+            # 尝试直接申请和完成任务
+            task_id = '1'
+            task_name = '每日威望红包'
             
-            if success_count > 0 or target_task_done:
-                print(f"  ✅ 成功完成 {success_count}/{len(new_tasks)} 个任务")
+            print(f"  处理任务: {task_name} (ID: {task_id})")
+            
+            # 申请任务
+            apply_url = f"{self.base_url}/home.php?mod=task&do=apply&id={task_id}"
+            apply_response = self.session.get(apply_url)
+            apply_text = apply_response.text
+            
+            # 检查申请结果
+            if '成功接受任务' in apply_text:
+                print(f"  ✅ 申请任务成功")
+            elif '您已经申请过' in apply_text or '进行中' in apply_text:
+                print(f"  ℹ️  任务已申请")
+            elif '已完成' in apply_text:
+                print(f"  ✅ 任务已完成")
                 return True
             else:
-                print(f"  ⚠️  未完成任何任务")
+                print(f"  ⚠️  申请任务失败")
+            
+            time.sleep(1)
+            
+            # 尝试完成任务
+            draw_url = f"{self.base_url}/home.php?mod=task&do=draw&id={task_id}"
+            draw_response = self.session.get(draw_url)
+            draw_text = draw_response.text
+            
+            if '恭喜' in draw_text or '成功' in draw_text:
+                # 提取奖励信息
+                reward_match = re.search(r'威望.*?(\d+)', draw_text)
+                if reward_match:
+                    reward = reward_match.group(1)
+                    print(f"  🎁 完成任务成功 (+{reward} 威望)")
+                else:
+                    print(f"  ✅ 完成任务成功")
+                return True
+            elif '已完成' in draw_text or '已领取' in draw_text:
+                print(f"  ✅ 任务已完成")
+                return True
+            elif '还未完成' in draw_text or '未完成' in draw_text:
+                print(f"  ⏳ 任务条件未满足")
+                return False
+            else:
+                print(f"  ⚠️  完成任务失败")
                 return False
                 
         except Exception as e:
