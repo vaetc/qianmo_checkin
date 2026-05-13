@@ -176,7 +176,27 @@ class QianMoCheckin:
             draw_response = self.session.get(draw_url)
             draw_text = draw_response.text
             
-            if '恭喜' in draw_text or '成功完成任务' in draw_text:
+            # 多种成功判断条件
+            success_keywords = [
+                '恭喜',
+                '成功完成任务',
+                '任务已完成',
+                '领取成功',
+                '奖励已发放'
+            ]
+            
+            is_success = any(keyword in draw_text for keyword in success_keywords)
+            
+            # 也检查是否有错误提示
+            error_keywords = [
+                '您还没有申请',
+                '任务不存在',
+                '操作失败'
+            ]
+            
+            has_error = any(keyword in draw_text for keyword in error_keywords)
+            
+            if is_success and not has_error:
                 # 提取奖励信息
                 reward_match = re.search(r'威望.*?(\d+)', draw_text)
                 if reward_match:
@@ -185,14 +205,20 @@ class QianMoCheckin:
                 else:
                     print(f"  ✅ 完成任务成功")
                 return True
-            elif '已完成' in draw_text or '已领取' in draw_text:
-                print(f"  ✅ 任务已完成")
+            
+            # 如果没有明确的成功或失败信息，检查任务状态来确认
+            time.sleep(1)
+            new_status = self.check_task_status()
+            
+            if new_status == 'done':
+                print(f"  ✅ 完成任务成功（已验证）")
+                return True
+            elif new_status == 'new':
+                # 任务又变成新的了，说明完成成功
+                print(f"  ✅ 完成任务成功（任务已刷新）")
                 return True
             else:
                 print(f"  ⚠️  完成任务失败")
-                # 打印部分响应用于调试
-                if len(draw_text) < 500:
-                    print(f"  调试信息: {draw_text[:200]}")
                 return False
                 
         except Exception as e:
