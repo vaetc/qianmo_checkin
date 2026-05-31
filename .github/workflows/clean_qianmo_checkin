@@ -1,0 +1,24 @@
+name: 清理阡陌居签到运行记录
+
+on:
+  schedule:
+    - cron: '0 19 * * 6'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 清理指定 workflow 的旧运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          workflow: qianmo_checkin.yml
+          retain_days: 7
+          keep_minimum_runs: 10
